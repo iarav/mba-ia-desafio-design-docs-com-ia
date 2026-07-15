@@ -89,7 +89,15 @@ Ordem sugerida de leitura para quem chega no repositório:
 
 O código base (`src/`, `prisma/`, `tests/`) não foi alterado. É apenas o contexto sobre o qual os documentos foram escritos.
 
+<br>
+<br>
+
 ---
+
+<details>
+<summary>Enunciado original do desafio (clique para expandir)</summary>
+
+<br>
 
 # Da Reunião ao Documento: Design Docs Gerados por IA
 
@@ -385,3 +393,7 @@ Cuidado com o que NÃO entra na documentação. A reunião descarta explicitamen
 A restrição de não alterar o código da aplicação é absoluta: o código serve de contexto e referência, e o entregável é puramente documental.
 
 Itere bastante. Os primeiros documentos que a IA gerar provavelmente serão superficiais ou redundantes. Volte com correções, peça refinamento de pontos específicos, peça para remover trechos vagos, peça exemplos concretos. O resultado final deve parecer escrito por alguém que pensou no problema com a IA ao lado, não por alguém que copiou e colou da transcrição.
+
+</details>
+
+---
