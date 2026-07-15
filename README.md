@@ -1,3 +1,96 @@
+# Processo de Produção — Design Docs do Sistema de Webhooks
+
+## Sobre o desafio
+
+O desafio foi transformar a transcrição de uma reunião técnica (`TRANSCRICAO.md`) — na qual tech lead, PM, engenheiros e segurança fecharam a arquitetura de um Sistema de Webhooks de Notificação de Pedidos para um OMS existente — em um pacote de design docs (PRD, RFC, FDD, ADRs, Tracker), usando IA como principal ferramenta de produção.
+
+O papel exercido nesse desafio foi: definir a estrutura do pacote, formular os prompts, revisar criticamente cada saída da IA contra a transcrição e o código existente, e iterar até a documentação ficar internamente consistente e rastreável. A restrição fundamental foi não inventar requisitos — cada item precisa ter origem identificável na transcrição ou no código.
+
+## Ferramentas de IA utilizadas
+
+- **Claude Code (Anthropic)** — ferramenta principal. Rodou localmente com acesso ao repositório inteiro (transcrição, código-fonte, docs em progresso). Usado para: exploração inicial da base, extração de decisões da transcrição, geração dos rascunhos de cada documento, verificação cruzada entre docs e revisão final de consistência (contagem de tentativas, numeração de FRs, existência dos paths citados no FDD).
+
+## Workflow adotado
+
+A produção seguiu, com pequenas adaptações, a ordem sugerida no enunciado:
+
+1. **Contextualização** — leitura completa da `TRANSCRICAO.md` e mapeamento da estrutura de `src/` (módulos, `changeStatus`, hierarquia de erros, middlewares, logger, helper de paginação) para saber quais paths reais poderiam ser referenciados.
+2. **ADRs primeiro** — extração das 6 decisões principais listadas no enunciado + 1 decisão adicional (snapshot do payload), cada uma com timestamp de origem. Formato MADR com Status/Contexto/Decisão/Alternativas/Consequências.
+3. **RFC** — consolidação da proposta técnica em cima dos ADRs, incluindo diagrama ASCII do fluxo e as duas alternativas de fato descartadas na reunião (Redis Streams, worker no mesmo processo).
+4. **FDD** — desenho técnico detalhado, com atenção especial à seção "Integração com o sistema existente" exigida pelo desafio: cada path citado foi verificado no filesystem antes de ser incluído.
+5. **PRD** — produzido após o FDD, funcionou como consolidação de alto nível com foco em problema/escopo/métricas.
+6. **Tracker** — montado varrendo cada documento pronto e mapeando linha por linha à transcrição ou ao código (path:linha).
+7. **Revisão de consistência** — passe final cruzando os documentos entre si, que gerou correções.
+
+## Prompts customizados
+
+Dois prompts foram determinantes para a qualidade das saídas.
+
+### Prompt 1 — Extração de decisões da transcrição para ADRs
+
+```
+Leia e análise a TRANSCRICAO.md e o código do repositório. A partir deles, produza uma lista com todas as DECISÕES ARQUITETURAIS efetivamente fechadas na reunião. Para cada decisão da lista, faça uma ADR seguindo o seguinte formato:
+- Estar na pasta `docs/adrs/` contém entre 5 e 8 arquivos no formato `ADR-NNN-titulo-em-kebab-case.md`
+- Cada ADR contém as seções Status, Contexto, Decisão, Alternativas Consideradas, Consequências
+
+Regras estritas:
+- Não invente decisões que não estejam literalmente na transcrição.
+- Se uma decisão foi apenas mencionada sem fechamento, marque como "aberta"
+  e liste separadamente.
+- Ignore detalhes de implementação secundários (formato de payload, timeouts,
+  headers) a menos que a reunião tenha dedicado discussão a eles.
+```
+
+### Prompt 2 — Auditoria de consistência do pacote
+
+```
+Analise todas as documentações em docs/ e valide se elas estão corretas com
+base no que elas são (FDD, PRD, RFC e ADR), analise o TRACKER e valide seu
+conteúdo com base na TRANSCRICAO.md e no código do projeto.
+
+Para cada documento, aponte:
+1. Se a estrutura corresponde ao tipo (PRD ≠ FDD ≠ RFC ≠ ADR).
+2. Inconsistências internas (numeração duplicada, contagens diferentes,
+   contradições entre seções).
+3. Referências a arquivos de código que não existem no repositório.
+4. Itens do tracker cujo timestamp na transcrição não bate com a decisão citada.
+
+Foque em achar contradições e itens fora do lugar, não em reescrever.
+```
+
+## Iterações e ajustes
+
+Foram 4 iterações principais de geração + revisão crítica até o resultado final. Os ajustes mais relevantes:
+
+1. **Contagem de tentativas de retry inconsistente entre PRD, ADR-002 e FDD.**
+   A primeira geração deixou "5 tentativas" no PRD e no título do ADR-002, mas o ADR listava 6 itens numerados (1 imediata + 5 intervalos) e o FDD dizia "6 tentativas totais". Foi necessária uma passada de auditoria (usando o Prompt 2 acima) para detectar o descasamento e reescrever ADR-002 como "5 retries após a 1ª tentativa (6 no total)", com o mesmo texto propagado para FR-08/FR-09 do PRD e para o Tracker.
+
+2. **Numeração duplicada de FRs no PRD.**
+   A primeira versão do PRD tinha uma lista curta `FR-01…FR-10` na seção "Escopo" e uma tabela `FR-01…FR-13` na seção "Requisitos Funcionais", com IDs iguais apontando para conteúdos diferentes (ex.: `FR-05` era "envio HTTP POST" numa lista e "evento inserido na outbox" na outra). O Tracker havia seguido a numeração da lista curta, então também precisou ser reindexado. Correção: consolidar a lista curta como resumo dos mesmos IDs da tabela de FRs, e realinhar 13 linhas do Tracker.
+
+3. **Tracker com cobertura incompleta e NFRs deslocados.**
+   Uma auditoria cruzada dos 11 documentos contra a transcrição revelou que o tracker cobria apenas 8 dos 10 NFRs do PRD, e a partir do NFR-06 a numeração estava deslocada (PRD-NFR-06 no tracker era "Garantia at-least-once" quando deveria ser "HMAC-SHA256"). Além disso, faltavam entradas para: exclusões de escopo do FDD (arquivamento de outbox, múltiplos workers, exactly-once delivery), os 8 critérios de aceitação do PRD, os 12 critérios de aceite técnico do FDD, e os contratos de PATCH/DELETE no FDD. No total, 35 entradas foram adicionadas ao tracker (de 86 para 121 linhas). Aproveitei para adicionar a coluna "Origem" na tabela de NFRs do PRD — estava ausente, enquanto a tabela de FRs já tinha timestamps.
+
+4. **Atribuição de timestamps imprecisa para métricas e decisões editoriais.**
+   A validação fina de timestamps mostrou que 5 entradas do tracker atribuíam afirmações a momentos da transcrição que não continham exatamente aquilo: os nomes das métricas de observabilidade (`webhook_outbox_lag_seconds`, `webhook_delivery_duration_ms`) e o graceful shutdown do worker nunca foram discutidos na reunião — são inferências de boas práticas. E as entradas sobre "eventId em logs" fundiam duas discussões distintas ([09:29] Bruno falando de Pino e [09:36] Sofia falando de auditoria) como se ambas fossem sobre eventId. Corrigido: as 5 entradas foram reclassificadas com fonte `EDITORIAL` (um novo tipo no tracker), com a cadeia de timestamps que motivou cada item explicitada. Isso fecha o gap entre "o que saiu da boca dos participantes" e "o que o autor inferiu como boa prática".
+
+Outros ajustes menores incluíram: remover repetições entre RFC e FDD (o RFC estava descendo para detalhes de payload que pertencem ao FDD), padronizar o prefixo `WEBHOOK_` na matriz de erros, e verificar cada `file:linha` citado no FDD contra o repositório real (nenhum path inventado sobreviveu à revisão).
+
+## Como navegar a entrega
+
+Ordem sugerida de leitura para quem chega no repositório:
+
+1. `TRANSCRICAO.md` — a fonte primária de todas as decisões.
+2. `docs/PRD.md` — o "por quê" e o "o quê" no nível de negócio/produto.
+3. `docs/RFC.md` — a proposta técnica em alto nível, com as alternativas.
+4. `docs/adrs/ADR-001-outbox-no-mysql.md` a `ADR-007-snapshot-payload-na-insercao.md` — cada decisão isolada, com contexto e consequências.
+5. `docs/FDD.md` — o "como implementar" em detalhe (fluxos, contratos HTTP, matriz de erros, integração com o código existente).
+6. `docs/TRACKER.md` — a rastreabilidade cruzada; útil para conferir de onde veio cada item.
+
+O código base (`src/`, `prisma/`, `tests/`) não foi alterado. É apenas o contexto sobre o qual os documentos foram escritos.
+
+---
+
 # Da Reunião ao Documento: Design Docs Gerados por IA
 
 ## Descrição
